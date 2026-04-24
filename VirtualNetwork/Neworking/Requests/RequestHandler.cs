@@ -20,6 +20,7 @@ namespace VirtualNetwork.Neworking.Requests
       var request = new HttpRequestMessage(HttpMethod.Post, url);
       request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
       request.Content = new StreamContent(data);
+      request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
 
       return await _httpClient.SendAsync(request);
     }

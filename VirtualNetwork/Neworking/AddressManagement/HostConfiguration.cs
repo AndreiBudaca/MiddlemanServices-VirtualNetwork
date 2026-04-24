@@ -5,7 +5,7 @@ namespace VirtualNetwork.Neworking.AddressManagement
 {
   public class HostConfiguration
   {
-    private readonly Dictionary<ClientDetails, IPAddress> clientIpMap = [];
+    private readonly Dictionary<ClientDetails, IPAddress> clientIpMap = new(new ClientDetailsComparer());
     private readonly Dictionary<IPAddress, ClientDetails> ipClientMap = [];
     private readonly IPAddress networkAddress;
     private readonly IPAddress mask;
@@ -152,6 +152,21 @@ namespace VirtualNetwork.Neworking.AddressManagement
       }
 
       return new IPAddress(gatewayBytes);
+    }
+  }
+
+  public class ClientDetailsComparer : IEqualityComparer<ClientDetails>
+  {
+    public bool Equals(ClientDetails? x, ClientDetails? y)
+    {
+      if (ReferenceEquals(x, y)) return true;
+      if (x is null || y is null) return false;
+      return x.Id.Equals(y.Id) && x.Name.Equals(y.Name);
+    }
+
+    public int GetHashCode(ClientDetails obj)
+    {
+      return HashCode.Combine(obj.Id, obj.Name);
     }
   }
 }
