@@ -12,6 +12,13 @@
   </ItemGroup>
 
   <Target Name="CopyCustomContent" AfterTargets="AfterBuild">
-    <Copy SourceFiles="./wintun/x64/wintun.dll" DestinationFolder="$(OutDir)" />
+    <PropertyGroup>
+      <WintunSourcePath>$(MSBuildProjectDirectory)\wintun\x86\wintun.dll</WintunSourcePath>
+      <WintunSourcePath Condition="'$(PROCESSOR_ARCHITECTURE)' == 'ARM64'">$(MSBuildProjectDirectory)\wintun\arm64\wintun.dll</WintunSourcePath>
+      <WintunSourcePath Condition="'$(PROCESSOR_ARCHITECTURE)' == 'ARM'">$(MSBuildProjectDirectory)\wintun\arm\wintun.dll</WintunSourcePath>
+    </PropertyGroup>
+
+    <Warning Condition="!Exists('$(WintunSourcePath)')" Text="No matching wintun.dll found for this build architecture. Add the correct architecture binary under the wintun folder." />
+    <Copy SourceFiles="$(WintunSourcePath)" DestinationFolder="$(OutDir)" Condition="Exists('$(WintunSourcePath)')" />
   </Target>
 </Project>

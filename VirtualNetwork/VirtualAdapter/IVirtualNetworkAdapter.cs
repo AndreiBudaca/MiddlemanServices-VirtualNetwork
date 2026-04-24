@@ -1,3 +1,4 @@
+using MiddleManClient.MethodProcessing.MethodDiscovery.Attributes;
 using MiddleManClient.ServerContracts;
 
 namespace VirtualNetwork.VirtualAdapter
@@ -6,6 +7,7 @@ namespace VirtualNetwork.VirtualAdapter
   {
     public Task Start();
 
+    [MiddleManMethod]
     public Task Receive(ServerContext context, IAsyncEnumerable<byte[]> dataStream);
   }
 }
