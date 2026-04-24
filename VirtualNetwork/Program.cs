@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Runtime.InteropServices;
 using MiddleManClient.ConnectionBuilder;
 using VirtualNetwork.Config;
 using VirtualNetwork.Neworking;
@@ -14,12 +15,27 @@ class Program
     var config = AppConfig.Load(configPath);
 
     var router = new Router(config);
-    var adapter = new WindowsNetworkAdapter(router);
+    var adapter = CreateAdapter(router);
     
     StartMiddleManClient(config, adapter, router);
     
     Console.WriteLine($"Starting virtual network client. Gateway mode: {config.IsGateway}");
     await adapter.Start();
+  }
+
+  private static IVirtualNetworkAdapter CreateAdapter(Router router)
+  {
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+    {
+      return new WindowsNetworkAdapter(router);
+    }
+
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+    {
+      return new LinuxNetworkAdapter(router);
+    }
+
+    throw new PlatformNotSupportedException("Only Windows and Linux are supported by VirtualNetwork adapters.");
   }
 
   private static void StartMiddleManClient(AppConfig config, IVirtualNetworkAdapter adapter, Router router)
