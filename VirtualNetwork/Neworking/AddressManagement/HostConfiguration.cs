@@ -8,12 +8,14 @@ namespace VirtualNetwork.Neworking.AddressManagement
     private readonly Dictionary<ClientDetails, IPAddress> clientIpMap = [];
     private readonly Dictionary<IPAddress, ClientDetails> ipClientMap = [];
     private readonly IPAddress networkAddress;
+    private readonly IPAddress mask;
     private readonly IPAddress gatewayAddress;
     private IPAddress lastAssignedIp;
 
     public HostConfiguration(string networkAddress, string addressMask)
     {
       this.networkAddress = IPAddress.Parse(networkAddress);
+      mask = IPAddress.Parse(addressMask);
       gatewayAddress = CalculateGatewayAddress(this.networkAddress, addressMask);
       lastAssignedIp = gatewayAddress;
     }
@@ -34,7 +36,14 @@ namespace VirtualNetwork.Neworking.AddressManagement
       return ipClientMap.TryGetValue(ip, out ClientDetails? value) ? value : null;
     }
 
+    public IEnumerable<ClientDetails> GetAllClients()
+    {
+      return clientIpMap.Keys;
+    }
+
     public IPAddress GetGatewayAddress() => gatewayAddress;
+
+    public IPAddress GetNetworkAddress() => networkAddress;
 
     private IPAddress GetNextAvailableIp()
     {
@@ -62,15 +71,84 @@ namespace VirtualNetwork.Neworking.AddressManagement
       return nextIp;
     }
 
+    public bool IsInVirtualSubnet(IPAddress ipAddress)
+    {
+      var ipBytes = ipAddress.GetAddressBytes();
+      var networkBytes = networkAddress.GetAddressBytes();
+      var maskBytes = mask.GetAddressBytes();
+
+      if (ipBytes.Length != networkBytes.Length || ipBytes.Length != maskBytes.Length)
+      {
+        return false;
+      }
+
+      for (int i = 0; i < ipBytes.Length; i++)
+      {
+        if ((ipBytes[i] & maskBytes[i]) != (networkBytes[i] & maskBytes[i]))
+        {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    public bool IsBroadcastAddress(IPAddress ipAddress)
+    {
+      var ipBytes = ipAddress.GetAddressBytes();
+      var networkBytes = networkAddress.GetAddressBytes();
+      var maskBytes = mask.GetAddressBytes();
+
+      if (ipBytes.Length != networkBytes.Length || ipBytes.Length != maskBytes.Length)
+      {
+        return false;
+      }
+
+      // Ensure the IP is in the same subnet first.
+      for (int i = 0; i < ipBytes.Length; i++)
+      {
+        if ((ipBytes[i] & maskBytes[i]) != (networkBytes[i] & maskBytes[i]))
+        {
+          return false;
+        }
+      }
+
+      // Broadcast = network OR inverted mask.
+      for (int i = 0; i < ipBytes.Length; i++)
+      {
+        byte broadcastByte = (byte)(networkBytes[i] | (byte)~maskBytes[i]);
+        if (ipBytes[i] != broadcastByte)
+        {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
     private static IPAddress CalculateGatewayAddress(IPAddress networkAddress, string addressMask)
     {
       var maskBytes = IPAddress.Parse(addressMask).GetAddressBytes();
       var networkBytes = networkAddress.GetAddressBytes();
 
-      var gatewayBytes = new byte[4];
-      for (int i = 0; i < 4; i++)
+      if (maskBytes.Length != networkBytes.Length)
       {
-        gatewayBytes[i] = (byte)(networkBytes[i] | (maskBytes[i] & 0xFF));
+        throw new ArgumentException("Mask and network address must have the same address family.");
+      }
+
+      // Use first host address in subnet as gateway candidate: network + 1.
+      var gatewayBytes = new byte[networkBytes.Length];
+      Array.Copy(networkBytes, gatewayBytes, networkBytes.Length);
+
+      for (int i = gatewayBytes.Length - 1; i >= 0; i--)
+      {
+        if (gatewayBytes[i] < 255)
+        {
+          gatewayBytes[i]++;
+          break;
+        }
+
+        gatewayBytes[i] = 0;
       }
 
       return new IPAddress(gatewayBytes);

@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net;
-using MiddleManClient.MethodProcessing.MethodDiscovery.Attributes;
 using MiddleManClient.ServerContracts;
 using VirtualNetwork.Neworking;
 
@@ -14,6 +13,7 @@ namespace VirtualNetwork.VirtualAdapter
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
     private WintunNative.WintunSession? wintunSession;
+    private bool routeConfigured;
 
     public async Task Receive(ServerContext context, IAsyncEnumerable<byte[]> dataStream)
     {
@@ -44,6 +44,7 @@ namespace VirtualNetwork.VirtualAdapter
 
       Console.WriteLine($"Virtual network adapter started with IP address: {ownIp}");
       ConfigureAdapterInterface(ownIp);
+      ConfigureVirtualSubnetRoute();
 
       Console.CancelKeyPress += (_, eventArgs) =>
       {
@@ -51,9 +52,16 @@ namespace VirtualNetwork.VirtualAdapter
         cancellationTokenSource.Cancel();
       };
 
-      await RunReadLoop(cancellationTokenSource.Token);
-      wintunSession.Dispose();
-      wintunSession = null;
+      try
+      {
+        await RunReadLoop(cancellationTokenSource.Token);
+      }
+      finally
+      {
+        RemoveVirtualSubnetRoute();
+        wintunSession?.Dispose();
+        wintunSession = null;
+      }
     }
 
     private async Task RunReadLoop(CancellationToken cancellationToken)
@@ -77,6 +85,7 @@ namespace VirtualNetwork.VirtualAdapter
 
           if (!router.IsInVirtualSubnet(destinationIp))
           {
+            Console.WriteLine($"Dropping packet for non-virtual destination {destinationIp}.");
             continue;
           }
 
@@ -96,9 +105,63 @@ namespace VirtualNetwork.VirtualAdapter
     private void ConfigureAdapterInterface(IPAddress ownIp)
     {
       var mask = router.GetAddressMask();
-      var gateway = router.GetGatewayAddress();
-      var arguments = $"interface ipv4 set address name=\"{AdapterName}\" source=static address={ownIp} mask={mask} gateway={gateway}";
+      var arguments = $"interface ipv4 set address name=\"{AdapterName}\" source=static address={ownIp} mask={mask}";
+      ExecuteNetsh(arguments, "adapter IPv4 address configuration");
+    }
 
+    private void ConfigureVirtualSubnetRoute()
+    {
+      var routePrefix = GetVirtualRoutePrefix();
+      var gateway = router.GetGatewayAddress();
+
+      // Ensure route lifecycle is runtime-only and deterministic for this process.
+      ExecuteNetsh($"interface ipv4 delete route prefix={routePrefix} interface=\"{AdapterName}\" nexthop={gateway}", "virtual subnet route cleanup before add", treatFailureAsWarning: true);
+
+      var added = ExecuteNetsh($"interface ipv4 add route prefix={routePrefix} interface=\"{AdapterName}\" nexthop={gateway} metric=10 store=active", "virtual subnet route add");
+      routeConfigured = added;
+    }
+
+    private void RemoveVirtualSubnetRoute()
+    {
+      if (!routeConfigured)
+      {
+        return;
+      }
+
+      var routePrefix = GetVirtualRoutePrefix();
+      var gateway = router.GetGatewayAddress();
+
+      ExecuteNetsh($"interface ipv4 delete route prefix={routePrefix} interface=\"{AdapterName}\" nexthop={gateway}", "virtual subnet route remove", treatFailureAsWarning: true);
+      routeConfigured = false;
+    }
+
+    private string GetVirtualRoutePrefix()
+    {
+      var networkAddress = router.GetNetworkAddress();
+      var mask = IPAddress.Parse(router.GetAddressMask());
+      var prefixLength = GetPrefixLength(mask);
+      return $"{networkAddress}/{prefixLength}";
+    }
+
+    private static int GetPrefixLength(IPAddress subnetMask)
+    {
+      var bits = 0;
+
+      foreach (var octet in subnetMask.GetAddressBytes())
+      {
+        var value = octet;
+        while (value != 0)
+        {
+          bits += value & 1;
+          value >>= 1;
+        }
+      }
+
+      return bits;
+    }
+
+    private static bool ExecuteNetsh(string arguments, string operationName, bool treatFailureAsWarning = false)
+    {
       var process = Process.Start(new ProcessStartInfo
       {
         FileName = "netsh",
@@ -111,16 +174,21 @@ namespace VirtualNetwork.VirtualAdapter
 
       if (process is null)
       {
-        Console.WriteLine("Unable to configure adapter IP: netsh process could not be started.");
-        return;
+        Console.WriteLine($"Unable to run netsh for {operationName}: process could not be started.");
+        return false;
       }
 
       process.WaitForExit();
-      if (process.ExitCode != 0)
+      if (process.ExitCode == 0)
       {
-        var errorOutput = process.StandardError.ReadToEnd();
-        Console.WriteLine($"Adapter IP configuration warning (exit {process.ExitCode}): {errorOutput}");
+        Console.WriteLine($"Successfully completed {operationName}.");
+        return true;
       }
+
+      var errorOutput = process.StandardError.ReadToEnd();
+      var severity = treatFailureAsWarning ? "warning" : "error";
+      Console.WriteLine($"Netsh {severity} during {operationName} (exit {process.ExitCode}): {errorOutput}");
+      return false;
     }
 
     private static bool TryParseIpv4Destination(byte[] packet, out IPAddress destinationIp, out int destinationPort)

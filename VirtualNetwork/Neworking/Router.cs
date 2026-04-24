@@ -39,7 +39,7 @@ namespace VirtualNetwork.Neworking
     {
       if (config.IsGateway)
       {
-        return IPAddress.Parse(config.Network.Address);
+        return hostConfig.GetGatewayAddress();
       }
 
       var gatewayUrl = GenerateClientUrl(config.MiddlemanUrl, gateway.Id, gateway.Name, "Connect");
@@ -64,41 +64,52 @@ namespace VirtualNetwork.Neworking
     public async Task Send(Stream data, string destinationIp, int destinationPort)
     {
       if (string.IsNullOrEmpty(destinationIp)) return;
+      var destinationIpParsed = IPAddress.Parse(destinationIp);
 
-      var clientDetails = (config.IsGateway ? GetClientDetails(destinationIp) : await QueryGateway(destinationIp))
-        ?? throw new Exception("Client details not found for the destination IP");
-
-      var clientUrl = GenerateClientUrl(config.MiddlemanUrl, clientDetails.Id, clientDetails.Name, "Receive");
-      var response = await RequestHandler.MakeHttpRequest(clientUrl, config.MiddlemanJwt, data);
-
-      if (!response.IsSuccessStatusCode) throw new Exception($"Failed to send data to client. Status code: {response.StatusCode}");
-    }
-
-    public bool IsInVirtualSubnet(IPAddress ipAddress)
-    {
-      var ipBytes = ipAddress.GetAddressBytes();
-      var networkBytes = IPAddress.Parse(config.Network.Address).GetAddressBytes();
-      var maskBytes = IPAddress.Parse(config.Network.AddressMask).GetAddressBytes();
-
-      if (ipBytes.Length != networkBytes.Length || ipBytes.Length != maskBytes.Length)
+      if (!hostConfig.IsInVirtualSubnet(destinationIpParsed))
       {
-        return false;
+        Console.WriteLine($"Destination IP {destinationIp} is outside of the virtual subnet. Dropping packet.");
+        return;
       }
 
-      for (int i = 0; i < ipBytes.Length; i++)
+      IEnumerable<ClientDetails> clients;
+
+      if (hostConfig.IsBroadcastAddress(destinationIpParsed))
       {
-        if ((ipBytes[i] & maskBytes[i]) != (networkBytes[i] & maskBytes[i]))
+        clients = hostConfig.GetAllClients().Where(client => !client.Id.Equals(gateway.Id) && !client.Name.Equals(gateway.Name));
+      }
+      else
+      {
+        var clientDetails = config.IsGateway ? GetClientDetails(destinationIp) : await QueryGateway(destinationIp);
+
+        if (clientDetails == null)
         {
-          return false;
+          Console.WriteLine($"No client found for destination IP {destinationIp}. Dropping packet.");
+          return;
+        }
+
+        clients = [clientDetails];
+      }
+
+      foreach (var clientDetails in clients)
+      {
+        var clientUrl = GenerateClientUrl(config.MiddlemanUrl, clientDetails.Id, clientDetails.Name, "Receive");
+        var response = await RequestHandler.MakeHttpRequest(clientUrl, config.MiddlemanJwt, data);
+
+        if (!response.IsSuccessStatusCode) 
+        {
+          Console.WriteLine($"Failed to send data to client. Status code: {response.StatusCode}");
         }
       }
-
-      return true;
     }
+
+    public bool IsInVirtualSubnet(IPAddress ipAddress) => hostConfig.IsInVirtualSubnet(ipAddress);
 
     public string GetAddressMask() => config.Network.AddressMask;
 
     public IPAddress GetGatewayAddress() => hostConfig.GetGatewayAddress();
+
+    public IPAddress GetNetworkAddress() => hostConfig.GetNetworkAddress();
 
     private async Task<ClientDetails?> QueryGateway(string destinationIp)
     {
