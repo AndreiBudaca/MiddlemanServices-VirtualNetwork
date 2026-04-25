@@ -43,7 +43,7 @@ namespace VirtualNetwork.Neworking
       }
 
       var gatewayUrl = GenerateClientUrl(config.MiddlemanUrl, gateway.Id, gateway.Name, "Connect");
-      var response = await RequestHandler.MakeHttpRequest(gatewayUrl, config.MiddlemanJwt, config.Network.Name);
+      var response = await RequestHandler.MakeHttpRequest(gatewayUrl, config.MiddlemanJwt, config.Network.Id, config.Network.Name);
 
       var adressString = await RequestHandler.HandleResponse<string>(response);
       if (string.IsNullOrEmpty(adressString)) throw new Exception("Failed to get IP address from gateway");
