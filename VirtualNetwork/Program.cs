@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using MiddleManClient.ConnectionBuilder;
+using MiddleManClient.MethodProcessing.MethodFunctionHandlerGenerator;
 using VirtualNetwork.Config;
 using VirtualNetwork.Neworking;
 using VirtualNetwork.VirtualAdapter;
@@ -49,9 +50,9 @@ class Program
        .Build();
 
       await connection.UseAssembly(Assembly.GetExecutingAssembly())
-        .RequestHttpMetadata(true)
         .AddMethodCallingHandler(adapter)
         .AddMethodCallingHandler(router)
+        .UseMethodFunctionHandlerGenerator(new DirectInvocationFunctionHandlerGenerator())
         .StartAsync();
     })
     {

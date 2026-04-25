@@ -15,26 +15,23 @@ namespace VirtualNetwork.VirtualAdapter
     private WintunNative.WintunSession? wintunSession;
     private bool routeConfigured;
 
-    public async Task Receive(ServerContext context, IAsyncEnumerable<byte[]> dataStream)
+    public async Task Receive(byte[] packet)
     {
       var session = wintunSession ?? throw new InvalidOperationException("Wintun session is not initialized. Start the adapter first.");
 
-      await foreach (var packet in dataStream.WithCancellation(cancellationTokenSource.Token))
+      if (packet.Length < 20)
       {
-        if (packet.Length < 20)
-        {
-          Console.WriteLine("Skipping received packet because payload is too small to be an IPv4 packet.");
-          continue;
-        }
-
-        if (!TryParseIpv4Destination(packet, out _, out _))
-        {
-          Console.WriteLine("Skipping received packet because it is not a valid IPv4 packet.");
-          continue;
-        }
-
-        session.SendPacket(packet);
+        Console.WriteLine("Skipping received packet because payload is too small to be an IPv4 packet.");
+        return;
       }
+
+      if (!TryParseIpv4Destination(packet, out _, out _))
+      {
+        Console.WriteLine("Skipping received packet because it is not a valid IPv4 packet.");
+        return;
+      }
+
+      session.SendPacket(packet);
     }
 
     public async Task Start()
@@ -79,13 +76,13 @@ namespace VirtualNetwork.VirtualAdapter
         {
           if (!TryParseIpv4Destination(packet, out var destinationIp, out var destinationPort))
           {
-            Console.WriteLine("Dropping packet because destination IPv4 could not be parsed.");
+            //Console.WriteLine("Dropping packet because destination IPv4 could not be parsed.");
             continue;
           }
 
           if (!router.IsInVirtualSubnet(destinationIp))
           {
-            Console.WriteLine($"Dropping packet for non-virtual destination {destinationIp}.");
+            //Console.WriteLine($"Dropping packet for non-virtual destination {destinationIp}.");
             continue;
           }
 

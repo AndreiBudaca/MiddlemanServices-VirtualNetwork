@@ -11,7 +11,7 @@ namespace VirtualNetwork.Neworking
   public class Router(AppConfig config)
   {
     private readonly AppConfig config = config;
-    private readonly HostConfiguration hostConfig = new(config.Network.Address, config.Network.AddressMask);
+    private readonly HostConfiguration hostConfig = new(config.Network);
 
     private readonly ClientDetails gateway = new()
     {
@@ -20,14 +20,14 @@ namespace VirtualNetwork.Neworking
     };
 
     [MiddleManMethod]
-    public string Connect(ServerContext context, string clientName)
+    public string Connect(string clientId, string clientName)
     {
       if (!config.IsGateway) return string.Empty;
-      if (string.IsNullOrEmpty(clientName) || string.IsNullOrEmpty(context.Request.User!.Identifier)) return string.Empty;
+      if (string.IsNullOrEmpty(clientName) || string.IsNullOrEmpty(clientId)) return string.Empty;
 
       var clientDetails = new ClientDetails
       {
-        Id = context.Request.User.Identifier,
+        Id = clientId,
         Name = clientName
       };
 
@@ -58,7 +58,9 @@ namespace VirtualNetwork.Neworking
       if (string.IsNullOrEmpty(ipAddress)) return null;
 
       var ip = IPAddress.Parse(ipAddress);
-      return hostConfig.GetClientByIp(ip);
+
+      var clientDetails = hostConfig.GetClientByIp(ip);
+      return clientDetails;
     }
 
     public async Task Send(Stream data, string destinationIp, int destinationPort)
@@ -116,6 +118,8 @@ namespace VirtualNetwork.Neworking
       var gatewayUrl = GenerateClientUrl(config.MiddlemanUrl, config.Network.GatewayId, config.Network.GatewayName, "GetClientDetails");
       var response = await RequestHandler.MakeHttpRequest(gatewayUrl, config.MiddlemanJwt, destinationIp);
 
+      var responseContent = await response.Content.ReadAsStringAsync();
+      Console.WriteLine($"Gateway response for IP {destinationIp}: {responseContent}");
       return await RequestHandler.HandleResponse<ClientDetails?>(response);
     }
 

@@ -1,4 +1,5 @@
 using System.Net;
+using VirtualNetwork.Config;
 using VirtualNetwork.Neworking.Models;
 
 namespace VirtualNetwork.Neworking.AddressManagement
@@ -6,18 +7,22 @@ namespace VirtualNetwork.Neworking.AddressManagement
   public class HostConfiguration
   {
     private readonly Dictionary<ClientDetails, IPAddress> clientIpMap = new(new ClientDetailsComparer());
-    private readonly Dictionary<IPAddress, ClientDetails> ipClientMap = [];
+    private readonly Dictionary<IPAddress, ClientDetails> ipClientMap = new(new IPAddressComparer());
     private readonly IPAddress networkAddress;
     private readonly IPAddress mask;
     private readonly IPAddress gatewayAddress;
     private IPAddress lastAssignedIp;
 
-    public HostConfiguration(string networkAddress, string addressMask)
+    public HostConfiguration(NetworkConfig config)
     {
-      this.networkAddress = IPAddress.Parse(networkAddress);
-      mask = IPAddress.Parse(addressMask);
-      gatewayAddress = CalculateGatewayAddress(this.networkAddress, addressMask);
+      networkAddress = IPAddress.Parse(config.Address);
+      mask = IPAddress.Parse(config.AddressMask);
+      gatewayAddress = CalculateGatewayAddress(networkAddress, config.AddressMask);
       lastAssignedIp = gatewayAddress;
+
+      var gatewayClientDetails = new ClientDetails { Id = config.GatewayId, Name = config.GatewayName };
+      clientIpMap.Add(gatewayClientDetails, gatewayAddress);
+      ipClientMap.Add(gatewayAddress, gatewayClientDetails);
     }
 
     public IPAddress AssignIpAddress(ClientDetails client)
@@ -167,6 +172,21 @@ namespace VirtualNetwork.Neworking.AddressManagement
     public int GetHashCode(ClientDetails obj)
     {
       return HashCode.Combine(obj.Id, obj.Name);
+    }
+  }
+
+  public class IPAddressComparer : IEqualityComparer<IPAddress>
+  {
+    public bool Equals(IPAddress? x, IPAddress? y)
+    {
+      if (ReferenceEquals(x, y)) return true;
+      if (x is null || y is null) return false;
+      return x.ToString().Equals(y.ToString());
+    }
+
+    public int GetHashCode(IPAddress obj)
+    {
+      return obj.GetHashCode();
     }
   }
 }

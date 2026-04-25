@@ -8,6 +8,6 @@ namespace VirtualNetwork.VirtualAdapter
     public Task Start();
 
     [MiddleManMethod]
-    public Task Receive(ServerContext context, IAsyncEnumerable<byte[]> dataStream);
+    public Task Receive(byte[] packet);
   }
 }

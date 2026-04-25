@@ -14,31 +14,28 @@ namespace VirtualNetwork.VirtualAdapter
 
     private const string AdapterNamePattern = "mmnet%d";
 
-    public Task Receive(ServerContext context, IAsyncEnumerable<byte[]> dataStream)
+    public Task Receive(byte[] packet)
     {
-      return ReceiveInternal(dataStream);
+      return ReceiveInternal(packet);
     }
 
-    private async Task ReceiveInternal(IAsyncEnumerable<byte[]> dataStream)
+    private async Task ReceiveInternal(byte[] packet)
     {
       var device = tunDevice ?? throw new InvalidOperationException("Linux TUN device is not initialized. Start the adapter first.");
 
-      await foreach (var packet in dataStream.WithCancellation(cancellationTokenSource.Token))
+      if (packet.Length < 20)
       {
-        if (packet.Length < 20)
-        {
-          Console.WriteLine("Skipping received packet because payload is too small to be an IPv4 packet.");
-          continue;
-        }
-
-        if (!TryParseIpv4Destination(packet, out _, out _))
-        {
-          Console.WriteLine("Skipping received packet because it is not a valid IPv4 packet.");
-          continue;
-        }
-
-        device.WritePacket(packet);
+        Console.WriteLine("Skipping received packet because payload is too small to be an IPv4 packet.");
+        return;
       }
+
+      if (!TryParseIpv4Destination(packet, out _, out _))
+      {
+        Console.WriteLine("Skipping received packet because it is not a valid IPv4 packet.");
+        return;
+      }
+
+      device.WritePacket(packet);
     }
 
     public async Task Start()
