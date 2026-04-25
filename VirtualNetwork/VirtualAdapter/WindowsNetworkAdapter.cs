@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net;
-using MiddleManClient.ServerContracts;
 using VirtualNetwork.Neworking;
 
 namespace VirtualNetwork.VirtualAdapter
@@ -25,7 +24,7 @@ namespace VirtualNetwork.VirtualAdapter
         return;
       }
 
-      if (!TryParseIpv4Destination(packet, out _, out _))
+      if (!TryParseIpv4Destination(packet, out _))
       {
         Console.WriteLine("Skipping received packet because it is not a valid IPv4 packet.");
         return;
@@ -74,7 +73,7 @@ namespace VirtualNetwork.VirtualAdapter
 
         while (session.TryReceivePacket(out var packet))
         {
-          if (!TryParseIpv4Destination(packet, out var destinationIp, out var destinationPort))
+          if (!TryParseIpv4Destination(packet, out var destinationIp))
           {
             //Console.WriteLine("Dropping packet because destination IPv4 could not be parsed.");
             continue;
@@ -89,7 +88,7 @@ namespace VirtualNetwork.VirtualAdapter
           try
           {
             await using var packetStream = new MemoryStream(packet, writable: false);
-            await router.Send(packetStream, destinationIp.ToString(), destinationPort > 0 ? destinationPort : 1);
+            await router.Send(packetStream, destinationIp);
           }
           catch (Exception ex)
           {
@@ -188,10 +187,9 @@ namespace VirtualNetwork.VirtualAdapter
       return false;
     }
 
-    private static bool TryParseIpv4Destination(byte[] packet, out IPAddress destinationIp, out int destinationPort)
+    private static bool TryParseIpv4Destination(byte[] packet, out IPAddress destinationIp)
     {
       destinationIp = IPAddress.None;
-      destinationPort = 0;
 
       if (packet.Length < 20)
       {
@@ -211,13 +209,6 @@ namespace VirtualNetwork.VirtualAdapter
       }
 
       destinationIp = new IPAddress(packet.AsSpan(16, 4));
-
-      var protocol = packet[9];
-      if ((protocol == 6 || protocol == 17) && packet.Length >= ihlBytes + 4)
-      {
-        destinationPort = (packet[ihlBytes + 2] << 8) | packet[ihlBytes + 3];
-      }
-
       return true;
     }
   }

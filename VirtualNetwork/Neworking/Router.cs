@@ -1,6 +1,5 @@
 using System.Net;
 using MiddleManClient.MethodProcessing.MethodDiscovery.Attributes;
-using MiddleManClient.ServerContracts;
 using VirtualNetwork.Config;
 using VirtualNetwork.Neworking.AddressManagement;
 using VirtualNetwork.Neworking.Models;
@@ -54,21 +53,24 @@ namespace VirtualNetwork.Neworking
     [MiddleManMethod]
     public ClientDetails? GetClientDetails(string ipAddress)
     {
-      if (!config.IsGateway) return null;
-      if (string.IsNullOrEmpty(ipAddress)) return null;
+      if (!IPAddress.TryParse(ipAddress, out var ip))
+      {
+        Console.WriteLine($"Received request for client details with invalid IP address: {ipAddress}");
+        return null;
+      }
 
-      var ip = IPAddress.Parse(ipAddress);
+      return GetClientDetails(ip);
+    }
 
-      var clientDetails = hostConfig.GetClientByIp(ip);
+    public ClientDetails? GetClientDetails(IPAddress ipAddress)
+    {
+      var clientDetails = hostConfig.GetClientByIp(ipAddress);
       return clientDetails;
     }
 
-    public async Task Send(Stream data, string destinationIp, int destinationPort)
+    public async Task Send(Stream data, IPAddress destinationIp)
     {
-      if (string.IsNullOrEmpty(destinationIp)) return;
-      var destinationIpParsed = IPAddress.Parse(destinationIp);
-
-      if (!hostConfig.IsInVirtualSubnet(destinationIpParsed))
+      if (!hostConfig.IsInVirtualSubnet(destinationIp))
       {
         Console.WriteLine($"Destination IP {destinationIp} is outside of the virtual subnet. Dropping packet.");
         return;
@@ -76,8 +78,14 @@ namespace VirtualNetwork.Neworking
 
       IEnumerable<ClientDetails> clients;
 
-      if (hostConfig.IsBroadcastAddress(destinationIpParsed))
+      if (hostConfig.IsBroadcastAddress(destinationIp))
       {
+        if (!config.IsGateway)
+        {
+          Console.WriteLine($"Received packet for broadcast address, but this client is not a gateway. Dropping packet.");
+          return;
+        }
+
         clients = hostConfig.GetAllClients().Where(client => !client.Id.Equals(gateway.Id) && !client.Name.Equals(gateway.Name));
       }
       else
@@ -113,13 +121,19 @@ namespace VirtualNetwork.Neworking
 
     public IPAddress GetNetworkAddress() => hostConfig.GetNetworkAddress();
 
-    private async Task<ClientDetails?> QueryGateway(string destinationIp)
+    private async Task<ClientDetails?> QueryGateway(IPAddress destinationIp)
     {
-      var gatewayUrl = GenerateClientUrl(config.MiddlemanUrl, config.Network.GatewayId, config.Network.GatewayName, "GetClientDetails");
-      var response = await RequestHandler.MakeHttpRequest(gatewayUrl, config.MiddlemanJwt, destinationIp);
+      var cachedClient = hostConfig.GetClientByIp(destinationIp);
+      if (cachedClient != null) return cachedClient;
 
-      var responseContent = await response.Content.ReadAsStringAsync();
-      Console.WriteLine($"Gateway response for IP {destinationIp}: {responseContent}");
+      var gatewayUrl = GenerateClientUrl(config.MiddlemanUrl, config.Network.GatewayId, config.Network.GatewayName, "GetClientDetails");
+      var response = await RequestHandler.MakeHttpRequest(gatewayUrl, config.MiddlemanJwt, destinationIp.ToString());
+
+      var clientDetails = await RequestHandler.HandleResponse<ClientDetails?>(response);
+      if (clientDetails != null)
+      {
+        hostConfig.CacheClientIp(clientDetails, destinationIp);
+      }
       return await RequestHandler.HandleResponse<ClientDetails?>(response);
     }
 

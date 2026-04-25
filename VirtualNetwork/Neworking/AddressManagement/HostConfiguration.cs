@@ -46,6 +46,12 @@ namespace VirtualNetwork.Neworking.AddressManagement
       return clientIpMap.Keys;
     }
 
+    public void CacheClientIp(ClientDetails client, IPAddress ip)
+    {
+      clientIpMap[client] = ip;
+      ipClientMap[ip] = client;
+    }
+
     public IPAddress GetGatewayAddress() => gatewayAddress;
 
     public IPAddress GetNetworkAddress() => networkAddress;
