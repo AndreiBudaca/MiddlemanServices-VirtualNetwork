@@ -6,6 +6,8 @@ namespace VirtualNetwork.VirtualAdapter
 {
   public class LinuxNetworkAdapter(Router router) : IVirtualNetworkAdapter
   {
+    private static readonly int[] PreferredMtuValues = [65535, 9000, 1500];
+
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
     private LinuxTunDevice? tunDevice;
@@ -106,7 +108,30 @@ namespace VirtualNetwork.VirtualAdapter
     {
       var prefixLength = GetPrefixLength(IPAddress.Parse(router.GetAddressMask()));
       ExecuteIp($"link set dev {interfaceName} up", "adapter link up");
+      ConfigureAdapterMtu(interfaceName);
       ExecuteIp($"addr replace {ownIp}/{prefixLength} dev {interfaceName}", "adapter IPv4 address configuration");
+    }
+
+    private void ConfigureAdapterMtu(string interfaceName)
+    {
+      foreach (var mtu in PreferredMtuValues)
+      {
+        var applied = ExecuteIp($"link set dev {interfaceName} mtu {mtu}", $"adapter MTU configuration ({mtu})", treatFailureAsWarning: true);
+        if (!applied)
+        {
+          continue;
+        }
+
+        if (TryGetConfiguredMtu(interfaceName, out var configuredMtu) && configuredMtu == mtu)
+        {
+          Console.WriteLine($"MTU configured to {configuredMtu} on {interfaceName}.");
+          return;
+        }
+
+        Console.WriteLine($"MTU verification failed for {interfaceName} at value {mtu}. Trying next fallback value.");
+      }
+
+      Console.WriteLine($"Failed to configure and verify MTU on {interfaceName}; kernel may enforce a lower MTU than requested.");
     }
 
     private void ConfigureVirtualSubnetRoute(string interfaceName)
@@ -188,6 +213,53 @@ namespace VirtualNetwork.VirtualAdapter
       var severity = treatFailureAsWarning ? "warning" : "error";
       Console.WriteLine($"ip {severity} during {operationName} (exit {process.ExitCode}): {errorOutput}");
       return false;
+    }
+
+    private static bool TryGetConfiguredMtu(string interfaceName, out int mtu)
+    {
+      mtu = 0;
+
+      var process = Process.Start(new ProcessStartInfo
+      {
+        FileName = "ip",
+        Arguments = $"link show dev {interfaceName}",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+      });
+
+      if (process is null)
+      {
+        Console.WriteLine("Unable to read MTU from ip: process could not be started.");
+        return false;
+      }
+
+      process.WaitForExit();
+      if (process.ExitCode != 0)
+      {
+        var errorOutput = process.StandardError.ReadToEnd();
+        Console.WriteLine($"Unable to read MTU from ip (exit {process.ExitCode}): {errorOutput}");
+        return false;
+      }
+
+      var output = process.StandardOutput.ReadToEnd();
+      var mtuToken = " mtu ";
+      var mtuStart = output.IndexOf(mtuToken, StringComparison.Ordinal);
+      if (mtuStart < 0)
+      {
+        return false;
+      }
+
+      mtuStart += mtuToken.Length;
+      var mtuEnd = output.IndexOf(' ', mtuStart);
+      if (mtuEnd < 0)
+      {
+        mtuEnd = output.Length;
+      }
+
+      var mtuText = output[mtuStart..mtuEnd].Trim();
+      return int.TryParse(mtuText, out mtu);
     }
 
     private static bool TryParseIpv4Destination(byte[] packet, out IPAddress destinationIp)

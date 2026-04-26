@@ -8,6 +8,7 @@ namespace VirtualNetwork.VirtualAdapter
   {
     private const string AdapterName = "Middleman Network";
     private const uint SessionCapacity = 0x00400000;
+    private static readonly int[] PreferredMtuValues = [65535, 9000, 1500];
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
@@ -102,6 +103,29 @@ namespace VirtualNetwork.VirtualAdapter
       var mask = router.GetAddressMask();
       var arguments = $"interface ipv4 set address name=\"{AdapterName}\" source=static address={ownIp} mask={mask}";
       ExecuteNetsh(arguments, "adapter IPv4 address configuration");
+      ConfigureAdapterMtu();
+    }
+
+    private void ConfigureAdapterMtu()
+    {
+      foreach (var mtu in PreferredMtuValues)
+      {
+        var applied = ExecuteNetsh($"interface ipv4 set subinterface \"{AdapterName}\" mtu={mtu} store=active", $"adapter MTU configuration ({mtu})", treatFailureAsWarning: true);
+        if (!applied)
+        {
+          continue;
+        }
+
+        if (TryGetConfiguredMtu(AdapterName, out var configuredMtu) && configuredMtu == mtu)
+        {
+          Console.WriteLine($"MTU configured to {configuredMtu} on {AdapterName}.");
+          return;
+        }
+
+        Console.WriteLine($"MTU verification failed for {AdapterName} at value {mtu}. Trying next fallback value.");
+      }
+
+      Console.WriteLine($"Failed to configure and verify MTU on {AdapterName}; Windows may enforce a lower MTU than requested.");
     }
 
     private void ConfigureVirtualSubnetRoute()
@@ -183,6 +207,61 @@ namespace VirtualNetwork.VirtualAdapter
       var errorOutput = process.StandardError.ReadToEnd();
       var severity = treatFailureAsWarning ? "warning" : "error";
       Console.WriteLine($"Netsh {severity} during {operationName} (exit {process.ExitCode}): {errorOutput}");
+      return false;
+    }
+
+    private static bool TryGetConfiguredMtu(string adapterName, out int mtu)
+    {
+      mtu = 0;
+
+      var process = Process.Start(new ProcessStartInfo
+      {
+        FileName = "netsh",
+        Arguments = "interface ipv4 show subinterfaces",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+      });
+
+      if (process is null)
+      {
+        Console.WriteLine("Unable to read MTU from netsh: process could not be started.");
+        return false;
+      }
+
+      process.WaitForExit();
+      if (process.ExitCode != 0)
+      {
+        var errorOutput = process.StandardError.ReadToEnd();
+        Console.WriteLine($"Unable to read MTU from netsh (exit {process.ExitCode}): {errorOutput}");
+        return false;
+      }
+
+      var output = process.StandardOutput.ReadToEnd();
+      using var reader = new StringReader(output);
+      while (reader.ReadLine() is { } line)
+      {
+        if (!line.Contains(adapterName, StringComparison.OrdinalIgnoreCase))
+        {
+          continue;
+        }
+
+        var columns = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (columns.Length < 4)
+        {
+          continue;
+        }
+
+        if (!int.TryParse(columns[0], out mtu))
+        {
+          mtu = 0;
+          continue;
+        }
+
+        return true;
+      }
+
       return false;
     }
 
