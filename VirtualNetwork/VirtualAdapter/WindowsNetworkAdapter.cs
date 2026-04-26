@@ -8,7 +8,7 @@ namespace VirtualNetwork.VirtualAdapter
   {
     private const string AdapterName = "Middleman Network";
     private const uint SessionCapacity = 0x00400000;
-    private static readonly int[] PreferredMtuValues = [65535, 9000, 1500];
+    private static readonly int[] PreferredMtuValues = [30000, 9000, 1500];
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();

@@ -6,7 +6,7 @@ namespace VirtualNetwork.VirtualAdapter
 {
   public class LinuxNetworkAdapter(Router router) : IVirtualNetworkAdapter
   {
-    private static readonly int[] PreferredMtuValues = [65535, 9000, 1500];
+    private static readonly int[] PreferredMtuValues = [30000, 9000, 1500];
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
