@@ -47,6 +47,7 @@ class Program
        .WithHost($"{config.MiddlemanUrl}/playground")
        .WithToken(config.MiddlemanJwt)
        .WithReconnect()
+       .WithPoolSize(11)
        .Build();
 
       await connection.UseAssembly(Assembly.GetExecutingAssembly())
