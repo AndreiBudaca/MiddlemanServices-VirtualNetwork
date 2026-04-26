@@ -1,8 +1,10 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
+using MiddleManClient;
 using MiddleManClient.ConnectionBuilder;
 using MiddleManClient.MethodProcessing.MethodFunctionHandlerGenerator;
 using VirtualNetwork.Config;
+using VirtualNetwork.Context;
 using VirtualNetwork.Neworking;
 using VirtualNetwork.VirtualAdapter;
 
@@ -17,9 +19,9 @@ class Program
 
     var router = new Router(config);
     var adapter = CreateAdapter(router);
-    
-    StartMiddleManClient(config, adapter, router);
-    
+
+    ConnectionContext.Connection = await StartMiddleManClient(config, adapter, router);
+
     Console.WriteLine($"Starting virtual network client. Gateway mode: {config.IsGateway}");
     await adapter.Start();
   }
@@ -39,27 +41,22 @@ class Program
     throw new PlatformNotSupportedException("Only Windows and Linux are supported by VirtualNetwork adapters.");
   }
 
-  private static void StartMiddleManClient(AppConfig config, IVirtualNetworkAdapter adapter, Router router)
+  private async static Task<ClientConnection> StartMiddleManClient(AppConfig config, IVirtualNetworkAdapter adapter, Router router)
   {
-    var serverThread = new Thread(async () =>
-    {
-      var connection = ClientConnectioBuilderFactory.Create()
-       .WithHost($"{config.MiddlemanUrl}/playground")
-       .WithToken(config.MiddlemanJwt)
-       .WithReconnect()
-       .WithPoolSize(11)
-       .Build();
+    var connection = ClientConnectioBuilderFactory.Create()
+     .WithHost($"{config.MiddlemanUrl}/playground")
+     .WithToken(config.MiddlemanJwt)
+     .WithReconnect()
+     .WithPoolSize(11)
+     .Build();
 
-      await connection.UseAssembly(Assembly.GetExecutingAssembly())
-        .AddMethodCallingHandler(adapter)
-        .AddMethodCallingHandler(router)
-        .UseMethodFunctionHandlerGenerator(new DirectInvocationFunctionHandlerGenerator())
-        .StartAsync();
-    })
-    {
-      IsBackground = true
-    };
-    serverThread.Start();
+    await connection.UseAssembly(Assembly.GetExecutingAssembly())
+      .UseMethodFunctionHandlerGenerator(new DirectInvocationFunctionHandlerGenerator())
+      .AddMethodCallingHandler(adapter)
+      .AddMethodCallingHandler(router)
+      .StartAsync(false);
+
+    return connection;
   }
 
   private static string GetConfigPath(string[] args)

@@ -1,9 +1,10 @@
 using System.Net;
 using MiddleManClient.MethodProcessing.MethodDiscovery.Attributes;
+using MiddleManClient.ServerContracts;
 using VirtualNetwork.Config;
+using VirtualNetwork.Context;
 using VirtualNetwork.Neworking.AddressManagement;
 using VirtualNetwork.Neworking.Models;
-using VirtualNetwork.Neworking.Requests;
 
 namespace VirtualNetwork.Neworking
 {
@@ -41,13 +42,13 @@ namespace VirtualNetwork.Neworking
         return hostConfig.GetGatewayAddress();
       }
 
-      var gatewayUrl = GenerateClientUrl(config.MiddlemanUrl, gateway.Id, gateway.Name, "Connect");
-      var response = await RequestHandler.MakeHttpRequest(gatewayUrl, config.MiddlemanJwt, config.Network.Id, config.Network.Name);
+      var response = await ConnectionContext.Connection!.InvokeAsync<string>(gateway.Id, gateway.Name, "Connect", new ParsedDirectInvocationRequest
+      {
+        Data = [config.Network.Id, config.Network.Name]
+      });
 
-      var adressString = await RequestHandler.HandleResponse<string>(response);
-      if (string.IsNullOrEmpty(adressString)) throw new Exception("Failed to get IP address from gateway");
-
-      return IPAddress.Parse(adressString);
+      if (string.IsNullOrEmpty(response.Data)) throw new Exception("Failed to get IP address from gateway");
+      return IPAddress.Parse(response.Data);
     }
 
     [MiddleManMethod]
@@ -68,7 +69,7 @@ namespace VirtualNetwork.Neworking
       return clientDetails;
     }
 
-    public async Task Send(Stream data, IPAddress destinationIp)
+    public async Task Send(byte[] data, IPAddress destinationIp)
     {
       if (!hostConfig.IsInVirtualSubnet(destinationIp))
       {
@@ -103,13 +104,10 @@ namespace VirtualNetwork.Neworking
 
       foreach (var clientDetails in clients)
       {
-        var clientUrl = GenerateClientUrl(config.MiddlemanUrl, clientDetails.Id, clientDetails.Name, GenerateReceiveMethod());
-        var response = await RequestHandler.MakeHttpRequest(clientUrl, config.MiddlemanJwt, data);
-
-        if (!response.IsSuccessStatusCode) 
+        var _ = await ConnectionContext.Connection!.InvokeAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
         {
-          Console.WriteLine($"Failed to send data to client. Status code: {response.StatusCode}");
-        }
+          Data = data
+        });
       }
     }
 
@@ -126,20 +124,21 @@ namespace VirtualNetwork.Neworking
       var cachedClient = hostConfig.GetClientByIp(destinationIp);
       if (cachedClient != null) return cachedClient;
 
-      var gatewayUrl = GenerateClientUrl(config.MiddlemanUrl, config.Network.GatewayId, config.Network.GatewayName, "GetClientDetails");
-      var response = await RequestHandler.MakeHttpRequest(gatewayUrl, config.MiddlemanJwt, destinationIp.ToString());
+      var response = await ConnectionContext.Connection!.InvokeAsync<ClientDetails>(config.Network.GatewayId, config.Network.GatewayName, "GetClientDetails", new ParsedDirectInvocationRequest
+      {
+        Data = [destinationIp.ToString()]
+      });
 
-      var clientDetails = await RequestHandler.HandleResponse<ClientDetails?>(response);
+      var clientDetails = response.Data;
       if (clientDetails != null)
       {
         hostConfig.CacheClientIp(clientDetails, destinationIp);
       }
-      return await RequestHandler.HandleResponse<ClientDetails?>(response);
+      return clientDetails;
     }
 
-    private static string GenerateClientUrl(string middlemanUrl, string clientId, string clientName, string method) =>
-      $"{middlemanUrl}/client-portal/{clientId}/{clientName}/{method}";
-
+    private static int LastReceiveIndex = 1;
+    private static readonly Lock ReceiveIndexLock = new();
     private static string GenerateReceiveMethod()
     {
       lock (ReceiveIndexLock)
@@ -150,8 +149,5 @@ namespace VirtualNetwork.Neworking
         return methodName;
       }
     }
-
-    private static int LastReceiveIndex = 1;
-    private static object ReceiveIndexLock = new();
   }
 }

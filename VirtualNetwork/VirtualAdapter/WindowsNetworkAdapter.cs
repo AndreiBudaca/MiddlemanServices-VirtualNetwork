@@ -87,8 +87,7 @@ namespace VirtualNetwork.VirtualAdapter
 
           try
           {
-            await using var packetStream = new MemoryStream(packet, writable: false);
-            await router.Send(packetStream, destinationIp);
+            await router.Send(packet, destinationIp);
           }
           catch (Exception ex)
           {
