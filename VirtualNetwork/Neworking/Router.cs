@@ -103,7 +103,7 @@ namespace VirtualNetwork.Neworking
 
       foreach (var clientDetails in clients)
       {
-        var clientUrl = GenerateClientUrl(config.MiddlemanUrl, clientDetails.Id, clientDetails.Name, "Receive");
+        var clientUrl = GenerateClientUrl(config.MiddlemanUrl, clientDetails.Id, clientDetails.Name, GenerateReceiveMethod());
         var response = await RequestHandler.MakeHttpRequest(clientUrl, config.MiddlemanJwt, data);
 
         if (!response.IsSuccessStatusCode) 
@@ -139,5 +139,19 @@ namespace VirtualNetwork.Neworking
 
     private static string GenerateClientUrl(string middlemanUrl, string clientId, string clientName, string method) =>
       $"{middlemanUrl}/client-portal/{clientId}/{clientName}/{method}";
+
+    private static string GenerateReceiveMethod()
+    {
+      lock (ReceiveIndexLock)
+      {
+        var methodName = $"Receive{LastReceiveIndex}";
+        LastReceiveIndex++;
+        if (LastReceiveIndex > 10) LastReceiveIndex = 1;
+        return methodName;
+      }
+    }
+
+    private static int LastReceiveIndex = 1;
+    private static object ReceiveIndexLock = new();
   }
 }

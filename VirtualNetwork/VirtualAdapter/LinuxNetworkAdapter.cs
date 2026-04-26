@@ -215,5 +215,65 @@ namespace VirtualNetwork.VirtualAdapter
       destinationIp = new IPAddress(packet.AsSpan(16, 4));
       return true;
     }
+
+    public Task Receive1(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive2(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive3(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive4(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive5(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive6(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive7(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive8(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive9(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive10(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive11(byte[] packet)
+    {
+      return Receive(packet);
+    }
+
+    public Task Receive12(byte[] packet)
+    {
+      return Receive(packet);
+    }
   }
 }
