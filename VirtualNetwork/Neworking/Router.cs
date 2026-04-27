@@ -6,6 +6,7 @@ using VirtualNetwork.Config;
 using VirtualNetwork.Context;
 using VirtualNetwork.Neworking.AddressManagement;
 using VirtualNetwork.Neworking.Models;
+using VirtualNetwork.VirtualAdapter;
 
 namespace VirtualNetwork.Neworking
 {
@@ -15,6 +16,7 @@ namespace VirtualNetwork.Neworking
     private readonly AppConfig config = config;
     private readonly HostConfiguration hostConfig = new(config.Network);
     private readonly SemaphoreSlim broadcastSendThrottle = new(MaxBroadcastSendConcurrency, MaxBroadcastSendConcurrency);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> nextPacketSequenceNumbers = new();
 
     private readonly ClientDetails gateway = new()
     {
@@ -111,7 +113,7 @@ namespace VirtualNetwork.Neworking
 
       var response = await ConnectionContext.Connection!.InvokeAsync<ClientDetails>(config.Network.GatewayId, config.Network.GatewayName, "GetClientDetails", new ParsedDirectInvocationRequest
       {
-        Data = [destinationIp.ToString()]
+        Data = [destinationIp.ToString()],
       });
 
       var clientDetails = response.Data;
@@ -127,9 +129,11 @@ namespace VirtualNetwork.Neworking
       await broadcastSendThrottle.WaitAsync();
       try
       {
+        var sequenceNumber = (ulong)nextPacketSequenceNumbers.AddOrUpdate(clientDetails.Id, 1, (_, current) => checked(current + 1));
+        var sequencedPacket = SequencedPacketEnvelope.Wrap(sequenceNumber, data);
         var _ = await ConnectionContext.Connection!.InvokeAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
         {
-          Data = data
+          Data = sequencedPacket
         });
       }
       finally

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Threading.Channels;
+using MiddleManClient.ServerContracts;
 using VirtualNetwork.Neworking;
 
 namespace VirtualNetwork.VirtualAdapter
@@ -12,6 +13,7 @@ namespace VirtualNetwork.VirtualAdapter
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
+    private readonly SequencedPacketReorderBuffer packetReorderBuffer = new();
     private readonly Channel<QueuedPacket> outboundPackets = Channel.CreateBounded<QueuedPacket>(new BoundedChannelOptions(OutboundQueueCapacity)
     {
       SingleWriter = true,
@@ -27,14 +29,20 @@ namespace VirtualNetwork.VirtualAdapter
 
     public Task Receive(byte[] packet)
     {
-      return ReceiveInternal(packet);
-    }
-
-    private async Task ReceiveInternal(byte[] packet)
-    {
       var device = tunDevice ?? throw new InvalidOperationException("Linux TUN device is not initialized. Start the adapter first.");
 
-      device.WritePacket(packet);
+      if (!SequencedPacketEnvelope.TryUnwrap(packet, out var sequenceNumber, out var payload))
+      {
+        Console.WriteLine("Dropping packet with an invalid sequencing envelope.");
+        return Task.CompletedTask;
+      }
+
+      foreach (var readyPacket in packetReorderBuffer.Add(sequenceNumber, payload))
+      {
+        device.WritePacket(readyPacket);
+      }
+
+      return Task.CompletedTask;
     }
 
     public async Task Start()

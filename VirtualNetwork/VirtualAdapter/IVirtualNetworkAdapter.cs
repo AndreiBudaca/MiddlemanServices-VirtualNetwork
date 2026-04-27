@@ -1,5 +1,4 @@
 using MiddleManClient.MethodProcessing.MethodDiscovery.Attributes;
-using MiddleManClient.ServerContracts;
 
 namespace VirtualNetwork.VirtualAdapter
 {

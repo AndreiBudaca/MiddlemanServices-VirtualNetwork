@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Threading.Channels;
+using MiddleManClient.ServerContracts;
 using VirtualNetwork.Neworking;
 
 namespace VirtualNetwork.VirtualAdapter
@@ -14,6 +15,7 @@ namespace VirtualNetwork.VirtualAdapter
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
+    private readonly SequencedPacketReorderBuffer packetReorderBuffer = new();
     private readonly Channel<QueuedPacket> outboundPackets = Channel.CreateBounded<QueuedPacket>(new BoundedChannelOptions(OutboundQueueCapacity)
     {
       SingleWriter = true,
@@ -29,7 +31,17 @@ namespace VirtualNetwork.VirtualAdapter
     {
       var session = wintunSession ?? throw new InvalidOperationException("Wintun session is not initialized. Start the adapter first.");
 
-      session.SendPacket(packet);
+      if (!SequencedPacketEnvelope.TryUnwrap(packet, out var sequenceNumber, out var payload))
+      {
+        Console.WriteLine("Dropping packet with an invalid sequencing envelope.");
+        return Task.CompletedTask;
+      }
+
+      foreach (var readyPacket in packetReorderBuffer.Add(sequenceNumber, payload))
+      {
+        session.SendPacket(readyPacket);
+      }
+
       return Task.CompletedTask;
     }
 
