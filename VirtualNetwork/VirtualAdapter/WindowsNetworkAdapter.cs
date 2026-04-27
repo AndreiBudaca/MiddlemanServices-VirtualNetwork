@@ -11,6 +11,7 @@ namespace VirtualNetwork.VirtualAdapter
     private const string AdapterName = "Middleman Network";
     private const uint SessionCapacity = 0x00400000;
     private const int OutboundQueueCapacity = 4096;
+    private static readonly TimeSpan GapRecoveryInterval = TimeSpan.FromMilliseconds(20);
     private static readonly int[] PreferredMtuValues = [30000, 9000, 1500];
 
     private readonly Router router = router;
@@ -37,7 +38,7 @@ namespace VirtualNetwork.VirtualAdapter
         return Task.CompletedTask;
       }
 
-      foreach (var readyPacket in packetReorderBuffer.Add(sequenceNumber, payload))
+      foreach (var readyPacket in packetReorderBuffer.Add(sequenceNumber, payload, DateTimeOffset.UtcNow))
       {
         session.SendPacket(readyPacket);
       }
@@ -61,6 +62,7 @@ namespace VirtualNetwork.VirtualAdapter
       };
 
       var sendWorkers = StartSendWorkers(cancellationTokenSource.Token);
+      var gapRecoveryTask = StartGapRecoveryLoop(cancellationTokenSource.Token);
 
       try
       {
@@ -69,11 +71,42 @@ namespace VirtualNetwork.VirtualAdapter
       finally
       {
         outboundPackets.Writer.TryComplete();
+        cancellationTokenSource.Cancel();
         await Task.WhenAll(sendWorkers);
+        await gapRecoveryTask;
         RemoveVirtualSubnetRoute();
         wintunSession?.Dispose();
         wintunSession = null;
       }
+    }
+
+    private Task StartGapRecoveryLoop(CancellationToken cancellationToken)
+    {
+      return Task.Run(async () =>
+      {
+        try
+        {
+          while (!cancellationToken.IsCancellationRequested)
+          {
+            await Task.Delay(GapRecoveryInterval, cancellationToken);
+
+            var session = wintunSession;
+            if (session is null)
+            {
+              continue;
+            }
+
+            foreach (var readyPacket in packetReorderBuffer.FlushExpired(DateTimeOffset.UtcNow))
+            {
+              session.SendPacket(readyPacket);
+            }
+          }
+        }
+        catch (OperationCanceledException)
+        {
+          // Adapter is shutting down.
+        }
+      }, cancellationToken);
     }
 
     private async Task RunReadLoop(CancellationToken cancellationToken)
