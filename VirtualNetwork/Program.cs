@@ -66,6 +66,6 @@ class Program
 
     if (args.Length > 0 && !string.IsNullOrEmpty(args[0])) return args[0];
 
-    return "D:\\Documents\\Projects\\MiddleMan Services\\VirtualNetwork\\config.json";
+    return "./config.json";
   }
 }
