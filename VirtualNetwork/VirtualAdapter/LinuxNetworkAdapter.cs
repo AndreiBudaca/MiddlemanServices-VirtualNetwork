@@ -10,7 +10,6 @@ namespace VirtualNetwork.VirtualAdapter
   {
     private static readonly int[] PreferredMtuValues = [30000, 9000, 1500];
     private const int OutboundQueueCapacity = 4096;
-    private static readonly TimeSpan GapRecoveryInterval = TimeSpan.FromMilliseconds(20);
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
@@ -38,7 +37,7 @@ namespace VirtualNetwork.VirtualAdapter
         return Task.CompletedTask;
       }
 
-      foreach (var readyPacket in packetReorderBuffer.Add(sequenceNumber, payload, DateTimeOffset.UtcNow))
+      foreach (var readyPacket in packetReorderBuffer.Add(sequenceNumber, payload))
       {
         device.WritePacket(readyPacket);
       }
@@ -62,7 +61,6 @@ namespace VirtualNetwork.VirtualAdapter
       };
 
       var sendWorkers = StartSendWorkers(cancellationTokenSource.Token);
-      var gapRecoveryTask = StartGapRecoveryLoop(cancellationTokenSource.Token);
 
       try
       {
@@ -71,43 +69,12 @@ namespace VirtualNetwork.VirtualAdapter
       finally
       {
         outboundPackets.Writer.TryComplete();
-        cancellationTokenSource.Cancel();
         await Task.WhenAll(sendWorkers);
-        await gapRecoveryTask;
         RemoveVirtualSubnetRoute(tunDevice.InterfaceName);
         ExecuteIp($"link set dev {tunDevice.InterfaceName} down", "adapter interface down", treatFailureAsWarning: true);
         tunDevice.Dispose();
         tunDevice = null;
       }
-    }
-
-    private Task StartGapRecoveryLoop(CancellationToken cancellationToken)
-    {
-      return Task.Run(async () =>
-      {
-        try
-        {
-          while (!cancellationToken.IsCancellationRequested)
-          {
-            await Task.Delay(GapRecoveryInterval, cancellationToken);
-
-            var device = tunDevice;
-            if (device is null)
-            {
-              continue;
-            }
-
-            foreach (var readyPacket in packetReorderBuffer.FlushExpired(DateTimeOffset.UtcNow))
-            {
-              device.WritePacket(readyPacket);
-            }
-          }
-        }
-        catch (OperationCanceledException)
-        {
-          // Adapter is shutting down.
-        }
-      }, cancellationToken);
     }
 
     private async Task RunReadLoop(CancellationToken cancellationToken)
