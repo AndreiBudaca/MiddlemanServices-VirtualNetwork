@@ -187,7 +187,7 @@ namespace VirtualNetwork.Neworking.AddressManagement
     {
       if (ReferenceEquals(x, y)) return true;
       if (x is null || y is null) return false;
-      return x.ToString().Equals(y.ToString());
+      return x.Equals(y);
     }
 
     public int GetHashCode(IPAddress obj)

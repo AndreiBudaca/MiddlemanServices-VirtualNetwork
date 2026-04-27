@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Threading.Channels;
 using VirtualNetwork.Neworking;
 
 namespace VirtualNetwork.VirtualAdapter
@@ -8,30 +9,28 @@ namespace VirtualNetwork.VirtualAdapter
   {
     private const string AdapterName = "Middleman Network";
     private const uint SessionCapacity = 0x00400000;
+    private const int OutboundQueueCapacity = 4096;
     private static readonly int[] PreferredMtuValues = [30000, 9000, 1500];
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
+    private readonly Channel<QueuedPacket> outboundPackets = Channel.CreateBounded<QueuedPacket>(new BoundedChannelOptions(OutboundQueueCapacity)
+    {
+      SingleWriter = true,
+      SingleReader = false,
+      FullMode = BoundedChannelFullMode.Wait
+    });
     private WintunNative.WintunSession? wintunSession;
     private bool routeConfigured;
 
-    public async Task Receive(byte[] packet)
+    private readonly record struct QueuedPacket(byte[] Packet, IPAddress DestinationIp);
+
+    public Task Receive(byte[] packet)
     {
       var session = wintunSession ?? throw new InvalidOperationException("Wintun session is not initialized. Start the adapter first.");
 
-      if (packet.Length < 20)
-      {
-        Console.WriteLine("Skipping received packet because payload is too small to be an IPv4 packet.");
-        return;
-      }
-
-      if (!TryParseIpv4Destination(packet, out _))
-      {
-        Console.WriteLine("Skipping received packet because it is not a valid IPv4 packet.");
-        return;
-      }
-
       session.SendPacket(packet);
+      return Task.CompletedTask;
     }
 
     public async Task Start()
@@ -49,12 +48,16 @@ namespace VirtualNetwork.VirtualAdapter
         cancellationTokenSource.Cancel();
       };
 
+      var sendWorkers = StartSendWorkers(cancellationTokenSource.Token);
+
       try
       {
         await RunReadLoop(cancellationTokenSource.Token);
       }
       finally
       {
+        outboundPackets.Writer.TryComplete();
+        await Task.WhenAll(sendWorkers);
         RemoveVirtualSubnetRoute();
         wintunSession?.Dispose();
         wintunSession = null;
@@ -88,7 +91,10 @@ namespace VirtualNetwork.VirtualAdapter
 
           try
           {
-            await router.Send(packet, destinationIp);
+            if (!outboundPackets.Writer.TryWrite(new QueuedPacket(packet, destinationIp)))
+            {
+              await outboundPackets.Writer.WriteAsync(new QueuedPacket(packet, destinationIp), cancellationToken);
+            }
           }
           catch (Exception ex)
           {
@@ -96,6 +102,42 @@ namespace VirtualNetwork.VirtualAdapter
           }
         }
       }
+    }
+
+    private Task[] StartSendWorkers(CancellationToken cancellationToken)
+    {
+      var workerCount = Math.Clamp(Environment.ProcessorCount, 2, 16);
+      var workers = new Task[workerCount];
+
+      for (var i = 0; i < workerCount; i++)
+      {
+        workers[i] = Task.Run(async () =>
+        {
+          try
+          {
+            while (await outboundPackets.Reader.WaitToReadAsync(cancellationToken))
+            {
+              while (outboundPackets.Reader.TryRead(out var queuedPacket))
+              {
+                try
+                {
+                  await router.Send(queuedPacket.Packet, queuedPacket.DestinationIp);
+                }
+                catch (Exception ex)
+                {
+                  Console.WriteLine($"Failed to send queued packet to {queuedPacket.DestinationIp}: {ex.Message}");
+                }
+              }
+            }
+          }
+          catch (OperationCanceledException)
+          {
+            // Adapter is shutting down.
+          }
+        }, cancellationToken);
+      }
+
+      return workers;
     }
 
     private void ConfigureAdapterInterface(IPAddress ownIp)

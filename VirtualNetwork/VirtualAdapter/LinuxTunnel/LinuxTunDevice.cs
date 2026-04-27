@@ -17,6 +17,7 @@ namespace VirtualNetwork.VirtualAdapter
     private const int EINTR = 4;
 
     private int fd;
+    private readonly byte[] readBuffer = new byte[MaxPacketSize];
 
     public string InterfaceName { get; }
 
@@ -116,12 +117,11 @@ namespace VirtualNetwork.VirtualAdapter
 
     public bool TryReadPacket(out byte[] packet)
     {
-      var buffer = new byte[MaxPacketSize];
-      var bytesRead = read(fd, buffer, (nuint)buffer.Length);
+      var bytesRead = read(fd, readBuffer, (nuint)readBuffer.Length);
       if (bytesRead > 0)
       {
         packet = new byte[bytesRead];
-        Buffer.BlockCopy(buffer, 0, packet, 0, bytesRead);
+        Buffer.BlockCopy(readBuffer, 0, packet, 0, bytesRead);
         return true;
       }
 

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Threading;
 using MiddleManClient.MethodProcessing.MethodDiscovery.Attributes;
 using MiddleManClient.ServerContracts;
 using VirtualNetwork.Config;
@@ -10,8 +11,10 @@ namespace VirtualNetwork.Neworking
 {
   public class Router(AppConfig config)
   {
+    private const int MaxBroadcastSendConcurrency = 16;
     private readonly AppConfig config = config;
     private readonly HostConfiguration hostConfig = new(config.Network);
+    private readonly SemaphoreSlim broadcastSendThrottle = new(MaxBroadcastSendConcurrency, MaxBroadcastSendConcurrency);
 
     private readonly ClientDetails gateway = new()
     {
@@ -77,38 +80,20 @@ namespace VirtualNetwork.Neworking
         return;
       }
 
-      IEnumerable<ClientDetails> clients;
-
       if (hostConfig.IsBroadcastAddress(destinationIp))
       {
-        if (!config.IsGateway)
-        {
-          Console.WriteLine($"Received packet for broadcast address, but this client is not a gateway. Dropping packet.");
-          return;
-        }
-
-        clients = hostConfig.GetAllClients().Where(client => !client.Id.Equals(gateway.Id) && !client.Name.Equals(gateway.Name));
+        return;
       }
-      else
+
+      var clientDetails = config.IsGateway ? GetClientDetails(destinationIp) : await QueryGateway(destinationIp);
+
+      if (clientDetails == null)
       {
-        var clientDetails = config.IsGateway ? GetClientDetails(destinationIp) : await QueryGateway(destinationIp);
-
-        if (clientDetails == null)
-        {
-          Console.WriteLine($"No client found for destination IP {destinationIp}. Dropping packet.");
-          return;
-        }
-
-        clients = [clientDetails];
+        Console.WriteLine($"No client found for destination IP {destinationIp}. Dropping packet.");
+        return;
       }
 
-      foreach (var clientDetails in clients)
-      {
-        var _ = await ConnectionContext.Connection!.InvokeAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
-        {
-          Data = data
-        });
-      }
+      await SendToClientAsync(clientDetails, data);
     }
 
     public bool IsInVirtualSubnet(IPAddress ipAddress) => hostConfig.IsInVirtualSubnet(ipAddress);
@@ -137,17 +122,34 @@ namespace VirtualNetwork.Neworking
       return clientDetails;
     }
 
-    private static int LastReceiveIndex = 1;
-    private static readonly Lock ReceiveIndexLock = new();
+    private async Task SendToClientAsync(ClientDetails clientDetails, byte[] data)
+    {
+      await broadcastSendThrottle.WaitAsync();
+      try
+      {
+        var _ = await ConnectionContext.Connection!.InvokeAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
+        {
+          Data = data
+        });
+      }
+      finally
+      {
+        broadcastSendThrottle.Release();
+      }
+    }
+
+    private static readonly string[] ReceiveMethods =
+    [
+      "Receive1", "Receive2", "Receive3", "Receive4", "Receive5", "Receive6",
+      "Receive7", "Receive8", "Receive9", "Receive10", "Receive11", "Receive12"
+    ];
+
+    private static int LastReceiveIndex;
+
     private static string GenerateReceiveMethod()
     {
-      lock (ReceiveIndexLock)
-      {
-        var methodName = $"Receive{LastReceiveIndex}";
-        LastReceiveIndex++;
-        if (LastReceiveIndex > 10) LastReceiveIndex = 1;
-        return methodName;
-      }
+      var index = Interlocked.Increment(ref LastReceiveIndex);
+      return ReceiveMethods[(index - 1) % ReceiveMethods.Length];
     }
   }
 }
