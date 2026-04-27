@@ -11,6 +11,9 @@ namespace VirtualNetwork.Config
     [JsonPropertyName("middlemanJwt")]
     public string MiddlemanJwt { get; set; } = string.Empty;
 
+    [JsonPropertyName("connectionPoolSize")]
+    public int ConnectionPoolSize { get; set; } = 32;
+
     [JsonPropertyName("isGateway")]
     public bool IsGateway { get; set; } = false;
 
