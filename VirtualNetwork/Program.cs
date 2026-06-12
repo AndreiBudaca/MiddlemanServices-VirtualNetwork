@@ -47,13 +47,14 @@ class Program
      .WithHost($"{config.MiddlemanUrl}/playground")
      .WithToken(config.MiddlemanJwt)
      .WithReconnect()
-     .WithPoolSize(32)
+     .WithPoolSize(config.ConnectionPoolSize)
      .Build();
 
     await connection.UseAssembly(Assembly.GetExecutingAssembly())
       .UseMethodFunctionHandlerGenerator(new DirectInvocationFunctionHandlerGenerator())
       .AddMethodCallingHandler(adapter)
       .AddMethodCallingHandler(router)
+      .WithPings(true)
       .StartAsync(false);
 
     return connection;
