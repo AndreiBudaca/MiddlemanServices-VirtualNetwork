@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MiddleManClient" Version="2.2.2" />
+    <PackageReference Include="MiddleManClient" Version="2.2.3" />
   </ItemGroup>
 
   <Target Name="CopyCustomContent" AfterTargets="AfterBuild">
