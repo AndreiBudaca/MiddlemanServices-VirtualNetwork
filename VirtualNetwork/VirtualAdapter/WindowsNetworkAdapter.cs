@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Threading.Channels;
-using MiddleManClient.ServerContracts;
 using VirtualNetwork.Neworking;
 
 namespace VirtualNetwork.VirtualAdapter
@@ -9,13 +8,13 @@ namespace VirtualNetwork.VirtualAdapter
   public class WindowsNetworkAdapter(Router router) : IVirtualNetworkAdapter
   {
     private const string AdapterName = "Middleman Network";
+    private const string EchoRequestFirewallRuleName = "Middleman Network ICMPv4 Echo";
     private const uint SessionCapacity = 0x00400000;
     private const int OutboundQueueCapacity = 4096;
     private static readonly int[] PreferredMtuValues = [30000, 9000, 1500];
 
     private readonly Router router = router;
     private readonly CancellationTokenSource cancellationTokenSource = new();
-    private readonly SequencedPacketReorderBuffer packetReorderBuffer = new();
     private readonly Channel<QueuedPacket> outboundPackets = Channel.CreateBounded<QueuedPacket>(new BoundedChannelOptions(OutboundQueueCapacity)
     {
       SingleWriter = true,
@@ -24,6 +23,7 @@ namespace VirtualNetwork.VirtualAdapter
     });
     private WintunNative.WintunSession? wintunSession;
     private bool routeConfigured;
+    private bool firewallRuleConfigured;
 
     private readonly record struct QueuedPacket(byte[] Packet, IPAddress DestinationIp);
 
@@ -31,16 +31,7 @@ namespace VirtualNetwork.VirtualAdapter
     {
       var session = wintunSession ?? throw new InvalidOperationException("Wintun session is not initialized. Start the adapter first.");
 
-      if (!SequencedPacketEnvelope.TryUnwrap(packet, out var sequenceNumber, out var payload))
-      {
-        Console.WriteLine("Dropping packet with an invalid sequencing envelope.");
-        return Task.CompletedTask;
-      }
-
-      foreach (var readyPacket in packetReorderBuffer.Add(sequenceNumber, payload))
-      {
-        session.SendPacket(readyPacket);
-      }
+      session.SendPacket(packet);
 
       return Task.CompletedTask;
     }
@@ -52,6 +43,7 @@ namespace VirtualNetwork.VirtualAdapter
 
       Console.WriteLine($"Virtual network adapter started with IP address: {ownIp}");
       ConfigureAdapterInterface(ownIp);
+      ConfigureInboundEchoRequestRule(ownIp);
       ConfigureVirtualSubnetRoute();
 
       Console.CancelKeyPress += (_, eventArgs) =>
@@ -71,6 +63,7 @@ namespace VirtualNetwork.VirtualAdapter
         outboundPackets.Writer.TryComplete();
         await Task.WhenAll(sendWorkers);
         RemoveVirtualSubnetRoute();
+        RemoveInboundEchoRequestRule();
         wintunSession?.Dispose();
         wintunSession = null;
       }
@@ -182,6 +175,18 @@ namespace VirtualNetwork.VirtualAdapter
       Console.WriteLine($"Failed to configure and verify MTU on {AdapterName}; Windows may enforce a lower MTU than requested.");
     }
 
+    private void ConfigureInboundEchoRequestRule(IPAddress ownIp)
+    {
+      var routePrefix = GetVirtualRoutePrefix();
+
+      ExecuteNetsh($"advfirewall firewall delete rule name=\"{EchoRequestFirewallRuleName}\"", "inbound ICMP echo rule cleanup before add", treatFailureAsWarning: true);
+
+      firewallRuleConfigured = ExecuteNetsh(
+        $"advfirewall firewall add rule name=\"{EchoRequestFirewallRuleName}\" dir=in action=allow protocol=icmpv4:8,any localip={ownIp} remoteip={routePrefix}",
+        "inbound ICMP echo rule add",
+        treatFailureAsWarning: false);
+    }
+
     private void ConfigureVirtualSubnetRoute()
     {
       var routePrefix = GetVirtualRoutePrefix();
@@ -206,6 +211,17 @@ namespace VirtualNetwork.VirtualAdapter
 
       ExecuteNetsh($"interface ipv4 delete route prefix={routePrefix} interface=\"{AdapterName}\" nexthop={gateway}", "virtual subnet route remove", treatFailureAsWarning: true);
       routeConfigured = false;
+    }
+
+    private void RemoveInboundEchoRequestRule()
+    {
+      if (!firewallRuleConfigured)
+      {
+        return;
+      }
+
+      ExecuteNetsh($"advfirewall firewall delete rule name=\"{EchoRequestFirewallRuleName}\"", "inbound ICMP echo rule remove", treatFailureAsWarning: true);
+      firewallRuleConfigured = false;
     }
 
     private string GetVirtualRoutePrefix()

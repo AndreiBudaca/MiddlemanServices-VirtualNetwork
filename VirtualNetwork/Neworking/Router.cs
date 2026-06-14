@@ -1,22 +1,17 @@
 using System.Net;
-using System.Threading;
 using MiddleManClient.MethodProcessing.MethodDiscovery.Attributes;
 using MiddleManClient.ServerContracts;
 using VirtualNetwork.Config;
 using VirtualNetwork.Context;
 using VirtualNetwork.Neworking.AddressManagement;
 using VirtualNetwork.Neworking.Models;
-using VirtualNetwork.VirtualAdapter;
 
 namespace VirtualNetwork.Neworking
 {
   public class Router(AppConfig config)
   {
-    private const int MaxBroadcastSendConcurrency = 16;
     private readonly AppConfig config = config;
     private readonly HostConfiguration hostConfig = new(config.Network);
-    private readonly SemaphoreSlim broadcastSendThrottle = new(MaxBroadcastSendConcurrency, MaxBroadcastSendConcurrency);
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> nextPacketSequenceNumbers = new();
 
     private readonly ClientDetails gateway = new()
     {
@@ -124,22 +119,12 @@ namespace VirtualNetwork.Neworking
       return clientDetails;
     }
 
-    private async Task SendToClientAsync(ClientDetails clientDetails, byte[] data)
+    private static async Task SendToClientAsync(ClientDetails clientDetails, byte[] data)
     {
-      await broadcastSendThrottle.WaitAsync();
-      try
+      _ = await ConnectionContext.Connection!.InvokeAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
       {
-        var sequenceNumber = (ulong)nextPacketSequenceNumbers.AddOrUpdate(clientDetails.Id, 1, (_, current) => checked(current + 1));
-        var sequencedPacket = SequencedPacketEnvelope.Wrap(sequenceNumber, data);
-        var _ = await ConnectionContext.Connection!.InvokeAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
-        {
-          Data = sequencedPacket
-        });
-      }
-      finally
-      {
-        broadcastSendThrottle.Release();
-      }
+        Data = data
+      });
     }
 
     private static readonly string[] ReceiveMethods =
