@@ -121,7 +121,7 @@ namespace VirtualNetwork.Neworking
 
     private static async Task SendToClientAsync(ClientDetails clientDetails, byte[] data)
     {
-      _ = await ConnectionContext.Connection!.InvokeAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
+      await ConnectionContext.Connection!.SendAsync(clientDetails.Id, clientDetails.Name, GenerateReceiveMethod(), new DirectInvocationData
       {
         Data = data
       });
