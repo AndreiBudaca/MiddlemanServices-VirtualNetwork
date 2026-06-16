@@ -130,7 +130,7 @@ namespace VirtualNetwork.Neworking
     private static readonly string[] ReceiveMethods =
     [
       "Receive1", "Receive2", "Receive3", "Receive4", "Receive5", "Receive6",
-      "Receive7", "Receive8", "Receive9", "Receive10", "Receive11", "Receive12"
+      // "Receive7", "Receive8", "Receive9", "Receive10", "Receive11", "Receive12"
     ];
 
     // private static readonly string[] ReceiveMethods =
