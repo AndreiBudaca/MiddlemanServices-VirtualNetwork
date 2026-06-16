@@ -129,7 +129,7 @@ namespace VirtualNetwork.Neworking
 
     private static readonly string[] ReceiveMethods =
     [
-      "Receive1", "Receive2", "Receive3", "Receive4", "Receive5", "Receive6",
+      "Receive1", // "Receive2", "Receive3", "Receive4", "Receive5", "Receive6",
       // "Receive7", "Receive8", "Receive9", "Receive10", "Receive11", "Receive12"
     ];
 
@@ -142,6 +142,7 @@ namespace VirtualNetwork.Neworking
 
     private static string GenerateReceiveMethod()
     {
+      return "Receive1";
       var index = Interlocked.Increment(ref LastReceiveIndex);
       return ReceiveMethods[(index - 1) % ReceiveMethods.Length];
     }
